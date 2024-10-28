@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Adds `get_hyper` method to `Server` class
+Deletion-resilient hypermedia pagination
 """
+
 import csv
-from typing import Dict, List, Tuple, Union
+import math
+from typing import List, Dict
 
 
 class Server:
@@ -13,6 +15,7 @@ class Server:
 
     def __init__(self):
         self.__dataset = None
+        self.__indexed_dataset = None
 
     def dataset(self) -> List[List]:
         """Cached dataset
@@ -25,47 +28,42 @@ class Server:
 
         return self.__dataset
 
-    @staticmethod
-    def index_range(page: int, page_size: int) -> Tuple[int, int]:
-        """Calculate start and end index range for a `page`, with `page_size`
+    def indexed_dataset(self) -> Dict[int, List]:
+        """Dataset indexed by sorting position, starting at 0
         """
-        nextPageStartIndex = page * page_size
-        return nextPageStartIndex - page_size, nextPageStartIndex
+        if self.__indexed_dataset is None:
+            dataset = self.dataset()
+            truncated_dataset = dataset[:1000]
+            self.__indexed_dataset = {
+                i: dataset[i] for i in range(len(dataset))
+            }
+        return self.__indexed_dataset
 
-    def get_page(self, page: int = 1, page_size: int = 10) -> List[List]:
-        """
-        Get items for the given page number
-        Args:
-            page (int): page number
-            page_size (int): number of items per page
-        Returns:
-            (List[List]): a list of list(row) if inputs are within range
-            ([]) : an empty list if page and page_size are out of range
-        """
-        assert type(page) == int and type(page_size) == int
-        assert page > 0 and page_size > 0
-        startIndex, endIndex = self.index_range(page, page_size)
-        return self.dataset()[startIndex:endIndex]
+    def get_hyper_index(self, index: int = None,
+                        page_size: int = 10) -> Dict:
+        """ return all data"""
 
-    def get_hyper(self, page: int,
-                  page_size: int) -> Dict[str, Union[int, List[List], None]]:
-        """
-        Args:
-            page (int): page number
-            page_size (int): number of items per page
-        Returns:
-            A dictionary of the following:
-                * page_size, page, data, next_page, prev_page, total_pages
-        """
-        data = self.get_page(page, page_size)
-        totalRows = len(self.dataset())
-        prev_page = page - 1 if page > 1 else None
-        next_page = page + 1
-        if self.index_range(page, page_size)[1] >= totalRows:
-            next_page = None
-        total_pages = totalRows / page_size
-        if total_pages % 1 != 0:
-            total_pages += 1
-        return {'page_size': len(data), 'page': page,
-                'data': data, 'next_page': next_page,
-                'prev_page': prev_page, 'total_pages': int(total_pages)}
+        if index is None:
+            index = 0
+
+        # validate the index
+        assert isinstance(index, int)
+        assert 0 <= index < len(self.indexed_dataset())
+        assert isinstance(page_size, int) and page_size > 0
+
+        data = []  # collect all indexed data
+        next_index = index + page_size
+
+        for value in range(index, next_index):
+            if self.indexed_dataset().get(value):
+                data.append(self.indexed_dataset()[value])
+            else:
+                value += 1
+                next_index += 1
+
+        return {
+            'index': index,
+            'data': data,
+            'page_size': page_size,
+            'next_index': next_index
+        }
